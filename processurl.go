@@ -24,6 +24,9 @@ type UrlParseResults struct {
 var Punctuation []string
 var checkRelativeLink = regexp.MustCompile(`(.+?)#`)
 
+var CaseSensitive = false
+var IndexAnchorTitles = true
+
 // Retrieve and parse the given URL
 func GetURL(url string) UrlParseResults {
 
@@ -98,7 +101,9 @@ func GetURL(url string) UrlParseResults {
 				    
 				    if attr.Key == "title" {
 				    	title = attr.Val
-				    	addToURLIndex(title, thisIndex)
+				    	if IndexAnchorTitles {
+				    		addToURLIndex(title, thisIndex)
+				    	}
 				    	// fmt.Printf("Need to index title: %v\n", attr.Val)
 				    }
 				} // done processing attributes
@@ -169,8 +174,10 @@ func addToURLIndex (s string, m map[string]int) {
 	}
 	
 	s = strings.Replace(s, string([]byte{194, 160}), " ", -1)
-	
-	tokens := strings.Split(strings.ToLower(s), " ")
+	if !CaseSensitive {
+		s = strings.ToLower(s)
+	}
+	tokens := strings.Split(s, " ")
 	for _, token := range tokens {
 	        token = strings.TrimSpace(token)
 	        token = strings.TrimSuffix(token, ":")
