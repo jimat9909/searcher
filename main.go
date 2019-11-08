@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"sync"
 	"strconv"
 	"strings"
 	"sort"
 	"net/url"
-	"github.com/jimat9909/processurl"
+	"io"
+	"net/http"
+	"log"
+	"golang.org/x/net/html"
+	
 )
 // Global Index of terms 
 
@@ -120,6 +125,171 @@ func (vm *VisitedMap) Reset(){
 	}
 }
 
+type UrlParseResults struct {
+	URL, Title 	string
+	EmbeddedURL	map[string]int
+	Index		map[string]int
+}
+
+// Used in cleaning up the content on a page
+var Punctuation []string
+var checkRelativeLink = regexp.MustCompile(`(.+?)#`)
+
+var CaseSensitive = false
+var IndexAnchorTitles = true
+
+// Retrieve and parse the given URL
+func GetURL(url string) UrlParseResults {
+
+	
+	pageTitle := url
+	inBody := false
+	
+	embeddedURL := make(map[string]int)
+	thisIndex := make(map[string]int)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("GetURL: Error on getting %v: %v \n", url, err)
+		return UrlParseResults{url, pageTitle, nil, nil}
+	}
+	defer resp.Body.Close()
+	tokenizer := html.NewTokenizer(resp.Body)
+	for {
+		tokenType := tokenizer.Next()
+
+		if tokenType == html.ErrorToken {
+			err := tokenizer.Err()
+			if err == io.EOF {
+				//end of the file, break out of the loop
+				break
+			}
+
+			log.Fatalf("error tokenizing HTML: %v", tokenizer.Err())
+		}
+
+		token := tokenizer.Token()
+		data := strings.TrimSpace(token.Data)
+		switch tokenType {
+				
+		case html.StartTagToken:
+		
+			switch data {
+			case "a": 
+				var newURL, title string
+				noFollow := false
+				
+				for _, attr := range token.Attr {				    
+				    if attr.Key == "href" {
+				    	if strings.HasPrefix(attr.Val, "#") {
+				    		noFollow = true
+					}
+				    
+				        if strings.HasPrefix(attr.Val, "http:") || strings.HasPrefix(attr.Val, "https:") {
+				        	newURL = attr.Val
+				        } else if strings.Contains(attr.Val, ":") {
+				        	noFollow = true
+				        } else {
+				    	    	newURL = url + "/" + attr.Val
+				    	    	if strings.HasPrefix (attr.Val, "/") {
+				    	    		newURL = url + attr.Val
+				    	    	}
+					}	
+				    }
+				    
+				    if attr.Key == "rel" && attr.Val == "nofollow" {
+				    	noFollow = true
+				    }
+				    
+				    if attr.Key == "title" {
+				    	title = attr.Val
+				    	if IndexAnchorTitles {
+				    		addToURLIndex(title, thisIndex)
+				    	}
+				    }
+				} // done processing attributes
+				
+				// last check in case we ended up with a relative link
+				isRelativeLink := checkRelativeLink.FindStringSubmatch(newURL)
+							
+				if isRelativeLink != nil {
+					newURL = isRelativeLink[1]
+				}
+				if !noFollow {
+					embeddedURL[newURL]++
+				}
+			
+			case "title":  
+				tokenizer.Next()
+				token := tokenizer.Token()
+				pageTitle = strings.TrimSpace(token.Data)			
+			
+			case "body": 
+				inBody = true
+				
+			case "style":
+				// skip style sheets
+				for {
+					tokenizer.Next()
+					token := tokenizer.Token()
+					if strings.TrimSpace(token.Data) == "style" {
+						break
+					}
+				}
+			case "script":
+				// skip scripts
+				for {
+					tokenizer.Next()
+					token := tokenizer.Token()
+					if strings.TrimSpace(token.Data) == "script" {
+						break
+					}
+				}
+			}
+
+		case html.TextToken:
+			if inBody && len(data) > 0 {
+				// fmt.Printf("Text - need to index %v \n", token.Data)
+				addToURLIndex(token.Data, thisIndex)
+			}
+				
+		}
+	}	
+	return UrlParseResults{url, pageTitle, embeddedURL, thisIndex}
+}
+
+// Add this text to the index for this page
+func addToURLIndex (s string, m map[string]int) {
+	
+	for _, p := range Punctuation {
+		s = strings.Replace(s, p, "", -1)
+	}
+	
+	s = strings.Replace(s, string([]byte{194, 160}), " ", -1)
+	if !CaseSensitive {
+		s = strings.ToLower(s)
+	}
+	tokens := strings.Split(s, " ")
+	for _, token := range tokens {
+	        token = strings.TrimSpace(token)
+	        token = strings.TrimSuffix(token, ":")
+		if len(token) > 0 {
+			m[token]++
+		}
+	}
+
+	return
+}
+
+// Load up the Pnctuation slice.  Used to get rid of extraneous characters that affect the indexing
+func InitializePunctuation () {
+	emdash := []byte{226, 128, 147}
+	regtm := []byte{194, 174}
+	copyright := []byte{194, 169}
+        Punctuation = append(Punctuation,".", ",", ";", "-", "!", string(emdash), string(regtm), string(copyright))
+	return
+}
+
 type crawlResult struct {
 	url, title string
 	depth, linkCount, indexCount int
@@ -134,9 +304,9 @@ type crawlRequest struct {
 	depth 	int
 }
 
-func CrawlURL (url string, token chan struct{})  processurl.UrlParseResults{
+func CrawlURL (url string, token chan struct{})  UrlParseResults{
 	token <- struct{}{}
-	theseResults := processurl.GetURL(url)
+	theseResults := GetURL(url)
 	<-token
 	return theseResults
 }
@@ -235,7 +405,6 @@ func Crawl (rooturl string, maxdepth, concurrency int, visited VisitedMap, index
 		crawlwg.Wait()
 		
 	}
-	// fmt.Printf("****** Crawl: Finally done with crawling root: Pages %v Terms %v\n", uniquePages, uniqueTerms)
 	fmt.Printf("\n")
 	return crawlSummary{uniquePages, uniqueTerms}
 }
@@ -256,8 +425,7 @@ func main() {
 	visited := VisitedMap{v: make(map[string]int)}
 	titles := URLtitles{titles: make(map[string]string)}
 	
-	processurl.InitializePunctuation()
-
+	InitializePunctuation()
 	
 	reader := bufio.NewReader(os.Stdin)
 	cliLoop:
@@ -271,7 +439,7 @@ func main() {
 		switch command[0] {
 			case "index", "i": 
 				if command[1] != "" {
-					GetURL(command[1], visited, index, titles)
+					IndexURL(command[1], visited, index, titles)
 				} else {
 					fmt.Printf ("index command needs a url to crawl\n")
 					Help()
@@ -307,7 +475,7 @@ func main() {
 
 // CLI commands and utilities follow
 
-func GetURL (rooturl string, visited VisitedMap, index Index, titles URLtitles) {
+func IndexURL (rooturl string, visited VisitedMap, index Index, titles URLtitles) {
 	parsedUrl, err := url.Parse(rooturl)
 	if err != nil {
 		fmt.Printf("URL %v doesn't look good %v %+v\n", rooturl, err, parsedUrl)
@@ -327,7 +495,7 @@ func GetURL (rooturl string, visited VisitedMap, index Index, titles URLtitles) 
 }
 
 func DisplayTerm (term string, index Index, titles URLtitles) {
-	if !processurl.CaseSensitive {
+	if !CaseSensitive {
 		term = strings.ToLower(term)
 	}
 	termList := index.GetTerm(term) 
@@ -376,8 +544,8 @@ func Help() {
 
 func ShowConfig() {
 	fmt.Printf("Configuration settings:\n")
-	fmt.Printf("\tCase Sensitive %v\tIf false, convert terms to lower case before indexing\n", processurl.CaseSensitive)
-	fmt.Printf("\tIndex Anchors %v\tIf true, index the titles of anchor tags\n", processurl.IndexAnchorTitles)
+	fmt.Printf("\tCase Sensitive %v\tIf false, convert terms to lower case before indexing\n", CaseSensitive)
+	fmt.Printf("\tIndex Anchors %v\tIf true, index the titles of anchor tags\n", IndexAnchorTitles)
 	fmt.Printf("\tCrawl Foreign %v\tIf true, crawl links to URLs outside of the root URL domain\n", CrawlForeign)
 	fmt.Printf("\tMaximum Depth %v\t\tHow many levels of embedded links to crawl\n", MaxDepth + 1)
 	fmt.Printf("\tConcurrency %v\t\tHow many concurrent pages to crawl\n", Concurrency)
@@ -389,16 +557,16 @@ func Set(command string) {
 	commandArgs := strings.SplitN(command, " ", 2)
 	switch commandArgs[0] {
 		case "case": 
-			processurl.CaseSensitive = true
+			CaseSensitive = true
 			fmt.Printf("Indexing is now case sensitive\n")
 		case "nocase":
-			processurl.CaseSensitive = false
+			CaseSensitive = false
 			fmt.Printf("Indexing is now case insensitive\n")
 		case "indexanchors":
-			processurl.IndexAnchorTitles = true
+			IndexAnchorTitles = true
 			fmt.Printf("Anchor titles will be indexed\n")
 		case "noindexAnchors":
-			processurl.IndexAnchorTitles = false
+			IndexAnchorTitles = false
 			fmt.Printf("Anchor titles will not be indexed\n")
 		case "crawlforeign":
 			CrawlForeign = true
@@ -440,8 +608,6 @@ func Set(command string) {
 			Help()
 					
 		}
-
-
 }
 
 func SortEntries (e []IndexEntry) []IndexEntry {
