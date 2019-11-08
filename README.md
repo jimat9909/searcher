@@ -15,6 +15,8 @@ The 'index (url)' command is used to crawl and index a URL
 
 The 'search (term)' command is used to display the results for that term.
 
+The 'clear' command will reset the global index of terms and the visited URLs map.
+
 Example session is shown below:
 ```
 > index www.patsgames.com
@@ -104,3 +106,44 @@ The concurrency variable is used to control the number of concurrent URL parsers
 	set concurrency N
 ```
 CLI command.
+
+Technical Notes
+===============
+
+Parsing
+-------
+
+The GetURL function will retrieve a URL and parse the information in the body.  It will return the following:
+```
+	url			the supplied url
+	title			the title of the page
+	embedded urls		a list of the embedded urls found on that page
+	index			a list of the terms found on that page
+```
+
+When parsing the text found on a page, certain punctuation is removed and the words are broken up by the space character.  More could be done here in
+processing the text. 
+
+Crawling
+--------
+
+The Crawl function will take an initial URL and put it on its internal work queue.  It will then continue to process items on the work queue until
+the queue is empty.  Each work queue item is a list of URLs to process - i.e. retrieve and index.
+
+The Crawl function will process each URL in a list as follows:
+
+1. Verify that it hasn't already visited this URL, or if so, it was done at a greater depth than is being requested now.  This supports crawling deeper 
+   into a website if desired.
+   
+2. Mark this URL as visited
+
+3. Initiate a go function to:
+	
+	A. Parse the URL
+	B. Index the results 
+	C. Add the embedded URLs to the Crawling work queue.  
+	
+It should be noted that the Crawl function will wait for all of the URLs in a work list to be processed before continuing with the nest work list.  This
+is to prevent the Crawl from returning summary results prematurely.
+
+4. When all the work items have been completed, Crawl will return the number of pages searched and the number of unique terms added to the global index.
