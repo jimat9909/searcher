@@ -3,7 +3,7 @@
 This program will crawl and index the terms  on a URL.  It will follow embedded links and index those pages as well, however it will only go to a depth of 3.
 
 Building and Running
---------------------
+====================
 I have used the golang.org/x/net/html package (https://godoc.org/golang.org/x/net/html). 
 
     go get golang.org/x/net/html
@@ -55,10 +55,10 @@ The following CLI commands are supported:
 ```
 
 Default Configuration
-----------------------
+=====================
   
 Searching Foreign Sites
-=======================
+-----------------------
 
 By default, the searcher will only follow links that have the same host as the original index request. The CLI commands
 ```
@@ -68,7 +68,7 @@ By default, the searcher will only follow links that have the same host as the o
 will control this.  
 
 Case Sensitivity
-================
+----------------
 
 By default, terms will be converted to lower case before indexing.  A given search term will also be converted before looking up the results. The CLI commands
 ```
@@ -78,7 +78,7 @@ By default, terms will be converted to lower case before indexing.  A given sear
 will control the case sensitivity.
 
 Indexing Anchor Titles
-======================
+----------------------
 
 By default the text in an anchor tag's title attribute will be indexed.  The CLI commands 
 ```
@@ -88,7 +88,7 @@ By default the text in an anchor tag's title attribute will be indexed.  The CLI
 can be used to control this.
 
 Depth
-=====
+-----
 
 As indicated, the searcher will follow embedded links to a depth of 3.  This may be configured by the 
 ```
@@ -97,7 +97,7 @@ As indicated, the searcher will follow embedded links to a depth of 3.  This may
 CLI command.
 
 Concurrency
-===========
+-----------
 
 The concurrency variable is used to control the number of concurrent URL parsers running.  This may be controlled by the 
 ```
