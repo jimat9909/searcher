@@ -433,6 +433,7 @@ func main() {
 		fmt.Print("> ")
 		lineIn, _ := reader.ReadString('\n')
 		lineIn = strings.Replace(lineIn, "\r\n", "", -1)
+		lineIn = strings.Replace(lineIn, "\n", "", -1)
 		lineIn = strings.Trim(lineIn, " ");
 		command := strings.SplitN(lineIn, " ", 2)
 		
